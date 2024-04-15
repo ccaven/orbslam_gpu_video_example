@@ -6,3 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+env_logger = "0.10"
+wgpu = "0.19.3"
+orbslam_gpu = { path = "../orbslam_gpu" }
+nokhwa = { path="./nokhwa", features=["input-native"]  }
+winit = "0.29.15"
+pollster = "0.3.0"
+bytemuck = "1.15.0"
