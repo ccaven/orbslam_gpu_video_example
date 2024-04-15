@@ -212,10 +212,7 @@ async fn run(
 
     // Create Vec<u8> and fill with zeros
     // This will hold the decoded image
-    let mut frame_buffer = Vec::<u8>::with_capacity((frame_width * frame_height * 4) as usize);
-    for _ in 0..frame_buffer.capacity() {
-        frame_buffer.push(0u8);
-    }
+    let mut frame_buffer = vec![0u8; (frame_width * frame_height * 4) as usize];
 
     let mut window_size = window.inner_size();
 
@@ -289,6 +286,8 @@ async fn run(
                     let new_camera_frame = camera.frame().unwrap();
                     new_camera_frame.decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer).unwrap();
                     println!("Decoded image in {} us", frame_timer.elapsed().as_micros());
+                    
+                    let compute_timer = std::time::Instant::now();
 
                     compute.queue.write_buffer(
                         &orb_program.buffers["input_image"], 0, &frame_buffer
@@ -329,9 +328,10 @@ async fn run(
                     compute.queue.submit(Some(encoder.finish()));
 
                     frame.present();
+
+                    compute.device.poll(wgpu::Maintain::Wait);
                     
-                    //println!("Time since last frame: {} us", last_frame_time.elapsed().as_micros());
-                    last_frame_time = std::time::Instant::now();
+                    println!("Compute time: {} us", compute_timer.elapsed().as_micros());
 
                     window.request_redraw();
                 },
