@@ -13,3 +13,7 @@ nokhwa = { path="./nokhwa", features=["input-native"]  }
 winit = "0.29.15"
 pollster = "0.3.0"
 bytemuck = "1.15.0"
+zune-jpeg = "0.4.11"
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3

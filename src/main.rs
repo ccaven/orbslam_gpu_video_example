@@ -183,18 +183,35 @@ async fn run(
         let mut camera = Camera::new(
             nokhwa::utils::CameraIndex::Index(0),
             RequestedFormat::new::<nokhwa::pixel_format::RgbAFormat>(
-                nokhwa::utils::RequestedFormatType::Exact(
-                    CameraFormat::new(
-                        Resolution::new(320, 240),
-                        FrameFormat::MJPEG,
-                        24
-                    )
-                )
+                //nokhwa::utils::RequestedFormatType::HighestFrameRate(30)
+                // nokhwa::utils::RequestedFormatType::Exact(
+                //     CameraFormat::new(
+                //         //Resolution::new(320, 240),
+                //         Resolution::new(800, 600),
+                //         FrameFormat::MJPEG,
+                //         30
+                //     )
+                // )
+                nokhwa::utils::RequestedFormatType::AbsoluteHighestResolution
             ),
         )
         .unwrap();
 
-        for format in camera.compatible_camera_formats().unwrap() {
+        println!("Frame rate: {}", camera.refresh_camera_format().unwrap().frame_rate());
+
+        let mut formats = camera.compatible_camera_formats().unwrap();
+
+        formats.sort_by(|a, b| {
+            if a.frame_rate() > b.frame_rate() {
+                std::cmp::Ordering::Greater
+            } else if a.frame_rate() < b.frame_rate() {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+
+        for format in formats {
             println!("Available: {:?}", format);
         }
 
@@ -234,8 +251,8 @@ async fn run(
     );
 
     let mut orb_program = OrbProgram::init(OrbConfig {
-        max_features: 5000,
-        max_matches: 5000,
+        max_features: 1000,
+        max_matches: 1000,
         image_size: vis.output_image_size
     }, compute.clone());
 
@@ -282,12 +299,14 @@ async fn run(
 
                     // Decode the image on the CPU and write the decoded buffer to the GPU
                     // TODO: Try to use VulkanVideo to stream directly to GPU
-                    let frame_timer = std::time::Instant::now();
+                    //let frame_timer = std::time::Instant::now();
                     let new_camera_frame = camera.frame().unwrap();
+                    //let mut decoder = zune_jpeg::JpegDecoder::new(new_camera_frame.buffer());
+                    //decoder.decode_into(&mut frame_buffer).unwrap();
                     new_camera_frame.decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer).unwrap();
-                    println!("Decoded image in {} us", frame_timer.elapsed().as_micros());
+                    //println!("Decoded image in {} us", frame_timer.elapsed().as_micros());
                     
-                    let compute_timer = std::time::Instant::now();
+                    //let compute_timer = std::time::Instant::now();
 
                     compute.queue.write_buffer(
                         &orb_program.buffers["input_image"], 0, &frame_buffer
@@ -329,9 +348,8 @@ async fn run(
 
                     frame.present();
 
-                    compute.device.poll(wgpu::Maintain::Wait);
-                    
-                    println!("Compute time: {} us", compute_timer.elapsed().as_micros());
+                    //compute.device.poll(wgpu::Maintain::Wait);
+                    //println!("Compute time: {} us", compute_timer.elapsed().as_micros());
 
                     window.request_redraw();
                 },
