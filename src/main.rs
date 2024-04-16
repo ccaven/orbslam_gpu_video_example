@@ -33,7 +33,7 @@ use nokhwa::{pixel_format::RgbAFormat, utils::{CameraFormat, FrameFormat, Reques
 
 use orbslam_gpu::{
     compute::{Compute, ComputeProgram},
-    orb_2::{OrbConfig, OrbParams, OrbProgram}
+    orb::{OrbConfig, OrbParams, OrbProgram}
 };
 
 struct VisualizationProgram<'a> {
