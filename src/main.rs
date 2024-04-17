@@ -42,7 +42,8 @@ struct VisualizationProgram<'a> {
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
     pub output_image_buffer: wgpu::Buffer,
-    pub output_image_size: wgpu::Extent3d
+    pub output_image_size: wgpu::Extent3d,
+    pub base_texture: wgpu::Texture
 }
 
 impl VisualizationProgram<'_> {
@@ -88,6 +89,16 @@ impl VisualizationProgram<'_> {
                         min_binding_size: Some(NonZeroU64::new(8).unwrap())
                     },
                     count: None
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture { 
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false }, 
+                        view_dimension: wgpu::TextureViewDimension::D2, 
+                        multisampled: false
+                    },
+                    count: None
                 }
             ]
         });
@@ -97,9 +108,7 @@ impl VisualizationProgram<'_> {
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
                 // TODO: Fill this out to match layout of incoming texture
-                bind_group_layouts: &[
-                    &bind_group_layout
-                ],
+                bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -144,6 +153,20 @@ impl VisualizationProgram<'_> {
             usage: wgpu::BufferUsages::UNIFORM
         });
 
+        let base_texture = compute.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Base texture"),
+            size: output_image_size,
+            sample_count: 1,
+            mip_level_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[]
+        });
+
+        let base_texture_view = base_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+
         let bind_group = compute.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_group_layout,
@@ -159,6 +182,10 @@ impl VisualizationProgram<'_> {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: window_size_buffer.as_entire_binding()
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&base_texture_view)
                 }
             ]
         });
@@ -169,7 +196,8 @@ impl VisualizationProgram<'_> {
             pipeline,
             bind_group,
             output_image_buffer,
-            output_image_size
+            output_image_size,
+            base_texture
         }
     }
 }
@@ -240,13 +268,15 @@ async fn run(
 
     let compute = Compute::init().await;
 
+    let output_image_size = wgpu::Extent3d {
+        width: window_size.width,
+        height: window_size.height,
+        depth_or_array_layers: 1
+    };
+
     let vis = VisualizationProgram::new(
         &compute, 
-        wgpu::Extent3d {
-            width: window_size.width,
-            height: window_size.height,
-            depth_or_array_layers: 1
-        }, 
+        output_image_size.clone(), 
         window.clone()
     );
 
@@ -261,7 +291,7 @@ async fn run(
             &orb_program.buffers["input_image_size"],
             0,
             bytemuck::cast_slice(&[ vis.output_image_size.width, vis.output_image_size.height ])
-        );
+        );        
     }
 
     let mut config = vis.surface
@@ -299,18 +329,48 @@ async fn run(
 
                     // Decode the image on the CPU and write the decoded buffer to the GPU
                     // TODO: Try to use VulkanVideo to stream directly to GPU
-                    //let frame_timer = std::time::Instant::now();
+                    
                     let new_camera_frame = camera.frame().unwrap();
                     //let mut decoder = zune_jpeg::JpegDecoder::new(new_camera_frame.buffer());
                     //decoder.decode_into(&mut frame_buffer).unwrap();
+                    let frame_timer = std::time::Instant::now();
                     new_camera_frame.decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer).unwrap();
-                    //println!("Decoded image in {} us", frame_timer.elapsed().as_micros());
-                    
+                    println!("Decoded image in {} us", frame_timer.elapsed().as_micros());
                     //let compute_timer = std::time::Instant::now();
 
                     compute.queue.write_buffer(
                         &orb_program.buffers["input_image"], 0, &frame_buffer
                     );
+
+                    compute.queue.write_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: &vis.base_texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All
+                        },
+                        &frame_buffer,
+                        wgpu::ImageDataLayout {
+                            offset: 0,
+                            bytes_per_row: (4 * frame_width).into(),
+                            rows_per_image: None
+                        },
+                        output_image_size
+                    );
+
+                    {
+                        let mut encoder_2 = compute.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Copy"),
+                        });
+                        encoder_2.copy_buffer_to_buffer(
+                            &orb_program.buffers["input_image"], 
+                            0, 
+                            &orb_program.buffers["integral_image_vis"],
+                            0, 
+                            orb_program.buffers["integral_image_vis"].size()
+                        );
+                        compute.queue.submit(Some(encoder_2.finish()));
+                    }
 
                     orb_program.run(OrbParams {
                         compute_matches: true

@@ -7,6 +7,9 @@ var<storage, read> texture: array<u32>;
 var<uniform> texture_size: vec2u;
 @group(0) @binding(2)
 var<uniform> window_size: vec2u;
+@group(0) @binding(3)
+var base_texture: texture_2d<f32>;
+
 
 struct VertexInput {
     @builtin(vertex_index) vertex_index: u32,
@@ -55,5 +58,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let tex_val_g = f32((tex_val >> 8) & 255) / 255.0;
     let tex_val_r = f32((tex_val) & 255) / 255.0;
 
-    return vec4f(tex_val_r, tex_val_g, tex_val_b, 1.0);
+    let tex_col = vec4f(tex_val_r, tex_val_g, tex_val_b, 0.0);
+
+    return max(textureLoad(base_texture, tex_pos, 0), tex_col);
 }
