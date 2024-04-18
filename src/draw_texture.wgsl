@@ -60,5 +60,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 
     let tex_col = vec4f(tex_val_r, tex_val_g, tex_val_b, 0.0);
 
-    return max(textureLoad(base_texture, tex_pos, 0), tex_col);
+    return tex_col;
 }

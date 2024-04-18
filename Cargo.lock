@@ -1298,6 +1298,7 @@ dependencies = [
  "bytemuck",
  "flume 0.11.0",
  "pollster",
+ "tiny_wgpu",
  "wgpu",
 ]
 
@@ -1791,6 +1792,13 @@ dependencies = [
  "arrayref",
  "bytemuck",
  "strict-num",
+]
+
+[[package]]
+name = "tiny_wgpu"
+version = "0.1.0"
+dependencies = [
+ "wgpu",
 ]
 
 [[package]]

@@ -281,8 +281,8 @@ async fn run(
     );
 
     let mut orb_program = OrbProgram::init(OrbConfig {
-        max_features: 1000,
-        max_matches: 1000,
+        max_features: 4096,
+        max_matches: 4096,
         image_size: vis.output_image_size
     }, compute.clone());
 
@@ -300,8 +300,6 @@ async fn run(
     vis.surface.configure(&compute.device, &config);
 
     let window = &window;
-
-    let mut last_frame_time = std::time::Instant::now();
 
     event_loop.run(move |event, target| {
         let _ = (&compute, &vis);
