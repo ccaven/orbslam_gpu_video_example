@@ -1311,6 +1311,7 @@ dependencies = [
  "nokhwa",
  "orbslam_gpu",
  "pollster",
+ "tiny_wgpu",
  "wgpu",
  "winit",
  "zune-jpeg",

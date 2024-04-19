@@ -49,16 +49,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 
     let tex_pos = vec2u(uv * vec2f(texture_size));
 
-    let tex_index = u32(tex_pos.y * texture_size.x + tex_pos.x);
+    // let tex_index = u32(tex_pos.y * texture_size.x + tex_pos.x);
 
-    let tex_val: u32 = texture[tex_index];
+    // let tex_val: u32 = texture[tex_index];
 
-    let tex_val_a = f32((tex_val >> 24) & 255) / 255.0;
-    let tex_val_b = f32((tex_val >> 16) & 255) / 255.0;
-    let tex_val_g = f32((tex_val >> 8) & 255) / 255.0;
-    let tex_val_r = f32((tex_val) & 255) / 255.0;
+    // let tex_val_a = f32((tex_val >> 24) & 255) / 255.0;
+    // let tex_val_b = f32((tex_val >> 16) & 255) / 255.0;
+    // let tex_val_g = f32((tex_val >> 8) & 255) / 255.0;
+    // let tex_val_r = f32((tex_val) & 255) / 255.0;
 
-    let tex_col = vec4f(tex_val_r, tex_val_g, tex_val_b, 0.0);
+    // let tex_col = vec4f(tex_val_r, tex_val_g, tex_val_b, 0.0);
 
-    return tex_col;
+    return textureLoad(base_texture, tex_pos, 0);
 }

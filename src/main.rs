@@ -31,10 +31,9 @@ use winit::{
 
 use nokhwa::{pixel_format::RgbAFormat, utils::{CameraFormat, FrameFormat, RequestedFormat, Resolution}, Camera};
 
-use orbslam_gpu::{
-    compute::{Compute, ComputeProgram},
-    orb::{OrbConfig, OrbParams, OrbProgram}
-};
+use orbslam_gpu::orb_2::{OrbConfig, OrbProgram};
+
+use tiny_wgpu::Compute;
 
 struct VisualizationProgram<'a> {
     pub surface: wgpu::Surface<'a>,
@@ -280,19 +279,10 @@ async fn run(
         window.clone()
     );
 
-    let mut orb_program = OrbProgram::init(OrbConfig {
-        max_features: 4096,
-        max_matches: 4096,
+    let orb_program = OrbProgram::init(OrbConfig {
+        max_features: 8192,
         image_size: vis.output_image_size
     }, compute.clone());
-
-    {
-        compute.queue.write_buffer(
-            &orb_program.buffers["input_image_size"],
-            0,
-            bytemuck::cast_slice(&[ vis.output_image_size.width, vis.output_image_size.height ])
-        );        
-    }
 
     let mut config = vis.surface
         .get_default_config(&compute.adapter, window_size.width, window_size.height)
@@ -327,22 +317,14 @@ async fn run(
 
                     // Decode the image on the CPU and write the decoded buffer to the GPU
                     // TODO: Try to use VulkanVideo to stream directly to GPU
+                    // Or gstreamer with Vulkan integration
                     
                     let new_camera_frame = camera.frame().unwrap();
-                    //let mut decoder = zune_jpeg::JpegDecoder::new(new_camera_frame.buffer());
-                    //decoder.decode_into(&mut frame_buffer).unwrap();
-                    let frame_timer = std::time::Instant::now();
                     new_camera_frame.decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer).unwrap();
-                    println!("Decoded image in {} us", frame_timer.elapsed().as_micros());
-                    //let compute_timer = std::time::Instant::now();
-
-                    compute.queue.write_buffer(
-                        &orb_program.buffers["input_image"], 0, &frame_buffer
-                    );
 
                     compute.queue.write_texture(
                         wgpu::ImageCopyTexture {
-                            texture: &vis.base_texture,
+                            texture: &orb_program.program.textures["input_image"],
                             mip_level: 0,
                             origin: wgpu::Origin3d::ZERO,
                             aspect: wgpu::TextureAspect::All
@@ -356,30 +338,22 @@ async fn run(
                         output_image_size
                     );
 
-                    {
-                        let mut encoder_2 = compute.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Copy"),
-                        });
-                        encoder_2.copy_buffer_to_buffer(
-                            &orb_program.buffers["input_image"], 
-                            0, 
-                            &orb_program.buffers["integral_image_vis"],
-                            0, 
-                            orb_program.buffers["integral_image_vis"].size()
-                        );
-                        compute.queue.submit(Some(encoder_2.finish()));
-                    }
+                    orb_program.run();
 
-                    orb_program.run(OrbParams {
-                        compute_matches: true
-                    }, compute.clone());
-
-                    encoder.copy_buffer_to_buffer(
-                        &orb_program.buffers["integral_image_vis"], 
-                        0, 
-                        &vis.output_image_buffer, 
-                        0, 
-                        vis.output_image_buffer.size()
+                    encoder.copy_texture_to_texture(
+                        wgpu::ImageCopyTextureBase { 
+                            texture: &orb_program.program.textures["visualization"], 
+                            mip_level: 0, 
+                            origin: wgpu::Origin3d::ZERO, 
+                            aspect: wgpu::TextureAspect::All
+                        },
+                        wgpu::ImageCopyTextureBase { 
+                            texture: &vis.base_texture, 
+                            mip_level: 0, 
+                            origin: wgpu::Origin3d::ZERO, 
+                            aspect: wgpu::TextureAspect::All
+                        },
+                        orb_program.config.image_size.clone()
                     );
 
                     {
@@ -405,9 +379,6 @@ async fn run(
                     compute.queue.submit(Some(encoder.finish()));
 
                     frame.present();
-
-                    //compute.device.poll(wgpu::Maintain::Wait);
-                    //println!("Compute time: {} us", compute_timer.elapsed().as_micros());
 
                     window.request_redraw();
                 },
