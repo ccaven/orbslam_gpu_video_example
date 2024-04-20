@@ -31,7 +31,7 @@ use winit::{
 
 use nokhwa::{pixel_format::RgbAFormat, utils::{CameraFormat, FrameFormat, RequestedFormat, Resolution}, Camera};
 
-use orbslam_gpu::orb_2::{OrbConfig, OrbProgram};
+use orbslam_gpu::orb_2::{OrbConfig, OrbParams, OrbProgram};
 
 use tiny_wgpu::Compute;
 
@@ -252,6 +252,7 @@ async fn run(
         let resolution = frame.resolution();
 
         (resolution.width(), resolution.height())
+        // (640, 480)
     };
 
     // Create Vec<u8> and fill with zeros
@@ -290,6 +291,8 @@ async fn run(
     vis.surface.configure(&compute.device, &config);
 
     let window = &window;
+
+    let mut frame_count: u32 = 0;
 
     event_loop.run(move |event, target| {
         let _ = (&compute, &vis);
@@ -338,7 +341,13 @@ async fn run(
                         output_image_size
                     );
 
-                    orb_program.run();
+                    orb_program.run(OrbParams {
+                        record_keyframe: frame_count == 100
+                    });
+
+                    if frame_count == 100 {
+                        println!("Recorded keyframe.");
+                    }
 
                     encoder.copy_texture_to_texture(
                         wgpu::ImageCopyTextureBase { 
@@ -381,6 +390,8 @@ async fn run(
                     frame.present();
 
                     window.request_redraw();
+
+                    frame_count += 1;
                 },
                 WindowEvent::CloseRequested => {
                     target.exit();
