@@ -281,7 +281,8 @@ async fn run(
     );
 
     let orb_program = OrbProgram::init(OrbConfig {
-        max_features: 8192,
+        max_features: 1 << 14,
+        max_matches: 1 << 14,
         image_size: vis.output_image_size
     }, compute.clone());
 
