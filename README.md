@@ -1,19 +1,6 @@
-# orbslam_gpu
+# orbslam_gpu_video_example
 
-This project aims to implement ORB-SLAM using `wgpu` compute shaders.
-
-Progess on compute shader items:
- - [ ] Hardware accelerated video decoding
- - [x] FAST Corner Detection
- - [ ] Hierarchical features
- - [x] Gaussian blur
- - [x] Rotated BRIEF Feature Descriptors
- - [ ] Feature matching
- - [ ] Keypoint detection
-
-Progress on non-compute shader items:
- - [ ] Local bundle adjustment
- - [ ] Global bundle adjustment / loop closing
+This is an example application for the library [orbslam_gpu](https://github.com/ccaven/orbslam_gpu).
 
 ## Implementation Notes
 
