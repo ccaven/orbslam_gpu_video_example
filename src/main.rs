@@ -19,121 +19,52 @@ TODO:
 
 */
 
-use std::{borrow::Cow, num::NonZeroU64, sync::Arc};
+use std::sync::Arc;
 
-use pollster::FutureExt;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::EventLoop,
     window::Window,
 };
 
-use nokhwa::{pixel_format::RgbAFormat, utils::{CameraFormat, FrameFormat, RequestedFormat, Resolution}, Camera};
+use nokhwa::{pixel_format::RgbAFormat, utils::RequestedFormat, Camera};
 
 use orbslam_gpu::orb_2::{OrbConfig, OrbParams, OrbProgram};
 
-use tiny_wgpu::Compute;
+use tiny_wgpu::{BindGroupItem, Compute, ComputeProgram};
 
 struct VisualizationProgram<'a> {
     pub surface: wgpu::Surface<'a>,
-    pub shader: wgpu::ShaderModule,
-    pub pipeline: wgpu::RenderPipeline,
-    pub bind_group: wgpu::BindGroup,
-    pub output_image_size: wgpu::Extent3d,
-    pub base_texture: wgpu::Texture
+    pub program: tiny_wgpu::ComputeProgram<'a>
 }
 
 impl VisualizationProgram<'_> {
-    pub fn new(compute: &Compute, output_image_size: wgpu::Extent3d, window: Arc<Window>) -> Self {
+    pub fn new(compute: Arc<Compute>, output_image_size: wgpu::Extent3d, window: Arc<Window>) -> Self {
         let surface = compute.instance.create_surface(window).unwrap();
 
-        let shader = compute
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Simple Draw Texture Shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("draw_texture.wgsl"))),
-            });
+        let mut program = ComputeProgram::new(compute.clone());
 
-        let bind_group_layout = compute.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture { 
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false }, 
-                        view_dimension: wgpu::TextureViewDimension::D2, 
-                        multisampled: false
-                    },
-                    count: None
-                }
-            ]
-        });
+        program.add_module("draw_texture", wgpu::include_wgsl!("draw_texture.wgsl"));
 
-        let pipeline_layout = compute
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                // TODO: Fill this out to match layout of incoming texture
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[],
-            });
+        program.add_texture(
+            "texture",
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            wgpu::TextureFormat::Rgba8Unorm,
+            output_image_size
+        );
+
+        program.add_bind_group("draw_texture", &[
+            BindGroupItem::Texture { label: "texture" }
+        ]);
 
         let swapchain_capabilities = surface.get_capabilities(&compute.adapter);
         let swapchain_format = swapchain_capabilities.formats[0];
 
-        let pipeline = compute.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(swapchain_format.into())],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
-
-
-        let base_texture = compute.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Base texture"),
-            size: output_image_size,
-            sample_count: 1,
-            mip_level_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[]
-        });
-
-        let base_texture_view = base_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let bind_group = compute.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&base_texture_view)
-                }
-            ]
-        });
+        program.add_render_pipelines("draw_texture", &["draw_texture"], &[("draw_texture", ("vs_main", "fs_main"))], &[], &[Some(swapchain_format.into())], &[]);
 
         Self {
-            shader,
             surface,
-            pipeline,
-            bind_group,
-            output_image_size,
-            base_texture
+            program
         }
     }
 }
@@ -189,7 +120,6 @@ async fn run(
         let resolution = frame.resolution();
 
         (resolution.width(), resolution.height())
-        // (640, 480)
     };
 
     // Create Vec<u8> and fill with zeros
@@ -212,15 +142,15 @@ async fn run(
     };
 
     let vis = VisualizationProgram::new(
-        &compute, 
-        output_image_size.clone(), 
+        compute.clone(),
+        output_image_size, 
         window.clone()
     );
 
     let orb_program = OrbProgram::init(OrbConfig {
         max_features: 1 << 14,
         max_matches: 1 << 14,
-        image_size: vis.output_image_size
+        image_size: output_image_size
     }, compute.clone());
 
     let mut config = vis.surface
@@ -295,7 +225,7 @@ async fn run(
                             aspect: wgpu::TextureAspect::All
                         },
                         wgpu::ImageCopyTextureBase { 
-                            texture: &vis.base_texture, 
+                            texture: &vis.program.textures["texture"], 
                             mip_level: 0, 
                             origin: wgpu::Origin3d::ZERO, 
                             aspect: wgpu::TextureAspect::All
@@ -318,8 +248,8 @@ async fn run(
                             timestamp_writes: None,
                             occlusion_query_set: None,
                         });
-                        rpass.set_pipeline(&vis.pipeline);
-                        rpass.set_bind_group(0, &vis.bind_group, &[]);
+                        rpass.set_pipeline(&vis.program.render_pipelines["draw_texture"]);
+                        rpass.set_bind_group(0, &vis.program.bind_groups["draw_texture"], &[]);
                         rpass.draw(0..3, 0..1);
                     }
 
@@ -343,5 +273,5 @@ async fn run(
 fn main() -> Result<(), winit::error::EventLoopError> {
     let event_loop = EventLoop::new().unwrap();
     let window = Window::new(&event_loop).unwrap();
-    run(event_loop, Arc::new(window)).block_on()
+    pollster::block_on(run(event_loop, Arc::new(window)))
 }
