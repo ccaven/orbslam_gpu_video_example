@@ -40,7 +40,6 @@ struct VisualizationProgram<'a> {
     pub shader: wgpu::ShaderModule,
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
-    pub output_image_buffer: wgpu::Buffer,
     pub output_image_size: wgpu::Extent3d,
     pub base_texture: wgpu::Texture
 }
@@ -61,36 +60,6 @@ impl VisualizationProgram<'_> {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer { 
-                        ty: wgpu::BufferBindingType::Storage { read_only: true }, 
-                        has_dynamic_offset: false, 
-                        min_binding_size: Some(NonZeroU64::new(4).unwrap())
-                    },
-                    count: None
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(NonZeroU64::new(8).unwrap())
-                    },
-                    count: None
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(NonZeroU64::new(8).unwrap())
-                    },
-                    count: None
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture { 
                         sample_type: wgpu::TextureSampleType::Float { filterable: false }, 
@@ -114,13 +83,6 @@ impl VisualizationProgram<'_> {
         let swapchain_capabilities = surface.get_capabilities(&compute.adapter);
         let swapchain_format = swapchain_capabilities.formats[0];
 
-        let output_image_buffer = compute.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: (output_image_size.width * output_image_size.height * 4) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false
-        });
-
         let pipeline = compute.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(&pipeline_layout),
@@ -140,17 +102,6 @@ impl VisualizationProgram<'_> {
             multiview: None,
         });
 
-        let texture_size_buffer = compute.device.create_buffer_init(&BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&[ output_image_size.width, output_image_size.height ]),
-            usage: wgpu::BufferUsages::UNIFORM
-        });
-
-        let window_size_buffer = compute.device.create_buffer_init(&BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&[ output_image_size.width, output_image_size.height ]),
-            usage: wgpu::BufferUsages::UNIFORM
-        });
 
         let base_texture = compute.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Base texture"),
@@ -165,25 +116,12 @@ impl VisualizationProgram<'_> {
 
         let base_texture_view = base_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-
         let bind_group = compute.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: output_image_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: texture_size_buffer.as_entire_binding()
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: window_size_buffer.as_entire_binding()
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
                     resource: wgpu::BindingResource::TextureView(&base_texture_view)
                 }
             ]
@@ -194,7 +132,6 @@ impl VisualizationProgram<'_> {
             surface,
             pipeline,
             bind_group,
-            output_image_buffer,
             output_image_size,
             base_texture
         }
