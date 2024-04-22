@@ -1292,31 +1292,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "orbslam_gpu"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "flume 0.11.0",
- "pollster",
- "tiny_wgpu",
- "wgpu",
-]
-
-[[package]]
-name = "orbslam_gpu_video_example"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "env_logger",
- "nokhwa",
- "orbslam_gpu",
- "pollster",
- "tiny_wgpu",
- "wgpu",
- "winit",
-]
-
-[[package]]
 name = "owned_ttf_parser"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1799,6 +1774,31 @@ name = "tiny_wgpu"
 version = "0.1.0"
 dependencies = [
  "wgpu",
+]
+
+[[package]]
+name = "tinyslam"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "flume 0.11.0",
+ "pollster",
+ "tiny_wgpu",
+ "wgpu",
+]
+
+[[package]]
+name = "tinyslam_app"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "env_logger",
+ "nokhwa",
+ "pollster",
+ "tiny_wgpu",
+ "tinyslam",
+ "wgpu",
+ "winit",
 ]
 
 [[package]]

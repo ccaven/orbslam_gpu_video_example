@@ -6,7 +6,7 @@ use winit::{
 
 use nokhwa::{pixel_format::RgbAFormat, utils::RequestedFormat, Camera};
 
-use orbslam_gpu::orb_2::{OrbConfig, OrbParams, OrbProgram};
+use tinyslam::orb_2::{OrbConfig, OrbParams, OrbProgram};
 
 use tiny_wgpu::{BindGroupItem, Compute, ComputeProgram};
 
