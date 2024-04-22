@@ -1,6 +1,6 @@
-# orbslam_gpu_video_example
+# tinyslam_app
 
-This is an example application for the library [orbslam_gpu](https://github.com/ccaven/orbslam_gpu).
+This is an example application for the library [tinyslam](https://github.com/ccaven/tinyslam).
 
 ## Implementation Notes
 
