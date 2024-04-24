@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use pollster::FutureExt;
 use winit::{
     dpi::PhysicalSize, event::{Event, WindowEvent}, event_loop::EventLoop, window::Window
 };
@@ -8,41 +9,58 @@ use nokhwa::{pixel_format::RgbAFormat, utils::RequestedFormat, Camera};
 
 use tinyslam::orb::{OrbConfig, OrbParams, OrbProgram};
 
-use tiny_wgpu::{BindGroupItem, Compute, ComputeProgram};
+use tiny_wgpu::{
+    Compute,
+    Storage,
+    ComputeProgram,
+    ComputeProgramExt,
+    BindGroupItem
+};
 
 struct VisualizationProgram<'a> {
     pub surface: wgpu::Surface<'a>,
-    pub program: tiny_wgpu::ComputeProgram<'a>,
+
+    storage: Storage<'a>,
+    compute: &'a Compute
 }
 
-impl VisualizationProgram<'_> {
-    pub fn new(
-        compute: Arc<Compute>,
-        output_image_size: wgpu::Extent3d,
-        window: Arc<Window>,
-    ) -> Self {
-        let surface = compute.instance.create_surface(window).unwrap();
+impl<'a> ComputeProgram<'a> for VisualizationProgram<'a> {
+    fn compute(&self) -> &Compute {
+        self.compute
+    }
+    
+    fn storage(&self) -> &Storage<'a> {
+        &self.storage
+    }
 
-        let mut program = ComputeProgram::new(compute.clone());
+    fn storage_mut(&mut self) -> &mut Storage<'a> {
+        &mut self.storage
+    }
+}
 
-        program.add_module("draw_texture", wgpu::include_wgsl!("draw_texture.wgsl"));
+impl<'a> VisualizationProgram<'a> {    
+    pub fn init(
+        &mut self,
+        output_image_size: wgpu::Extent3d
+    ) {
+        self.add_module("draw_texture", wgpu::include_wgsl!("draw_texture.wgsl"));
 
-        program.add_texture(
+        self.add_texture(
             "texture",
             wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             wgpu::TextureFormat::Rgba8Unorm,
             output_image_size,
         );
 
-        program.add_bind_group(
+        self.add_bind_group(
             "draw_texture",
             &[BindGroupItem::Texture { label: "texture" }],
         );
 
-        let swapchain_capabilities = surface.get_capabilities(&compute.adapter);
+        let swapchain_capabilities = self.surface.get_capabilities(&self.compute().adapter);
         let swapchain_format = swapchain_capabilities.formats[0];
 
-        program.add_render_pipelines(
+        self.add_render_pipelines(
             "draw_texture",
             &["draw_texture"],
             &[("draw_texture", ("vs_main", "fs_main"))],
@@ -50,12 +68,10 @@ impl VisualizationProgram<'_> {
             &[Some(swapchain_format.into())],
             &[],
         );
-
-        Self { surface, program }
     }
 }
 
-async fn run(
+fn run(
     event_loop: EventLoop<()>,
     window: Arc<Window>,
 ) -> Result<(), winit::error::EventLoopError> {
@@ -108,42 +124,47 @@ async fn run(
         height: frame_height
     });
 
-    let compute = Compute::init().await;
-
-    let vis = VisualizationProgram::new(
-        compute.clone(), 
-        wgpu::Extent3d { 
-            width: frame_width, 
-            height: frame_height, 
-            depth_or_array_layers: 1
-        },
-        window.clone()
-    );
-
-    let orb_program = OrbProgram::init(
-        OrbConfig {
+    let mut orb_program = OrbProgram {
+        config: OrbConfig {
             max_features: 1 << 14,
             max_matches: 1 << 14,
             image_size: wgpu::Extent3d { 
                 width: frame_width, 
                 height: frame_height, 
                 depth_or_array_layers: 1
-            },
+            }
         },
-        compute.clone(),
-    );
+        compute: Compute::new().block_on(),
+        storage: Default::default()
+    };
+
+    orb_program.init();
+
+    let mut vis = VisualizationProgram {
+        compute: orb_program.compute(),
+        surface: orb_program.compute().instance.create_surface(&window).unwrap(),
+        storage: Default::default()
+    };
+
+    vis.init(wgpu::Extent3d {
+        width: frame_width,
+        height: frame_height,
+        depth_or_array_layers: 1
+    });
 
     let mut config = vis
         .surface
-        .get_default_config(&compute.adapter, frame_width, frame_height)
+        .get_default_config(&orb_program.compute().adapter, frame_width, frame_height)
         .unwrap();
     
-    vis.surface.configure(&compute.device, &config);
+    vis.surface.configure(&orb_program.compute().device, &config);
 
     let mut frame_count: u32 = 0;
 
+    let window = &window;
+    let orb_program = &orb_program;
+
     event_loop.run(move |event, target| {
-        let _ = (&compute, &vis);
 
         if let Event::WindowEvent {
             window_id: _,
@@ -154,7 +175,7 @@ async fn run(
                 WindowEvent::Resized(new_size) => {
                     config.width = new_size.width.max(1);
                     config.height = new_size.height.max(1);
-                    vis.surface.configure(&compute.device, &config);
+                    vis.surface.configure(&orb_program.compute().device, &config);
                     window.request_redraw();
                 },
                 WindowEvent::RedrawRequested => {
@@ -163,7 +184,7 @@ async fn run(
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
                     let mut encoder =
-                        compute
+                        orb_program.compute()
                             .device
                             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                                 label: Some("Draw loop"),
@@ -176,25 +197,7 @@ async fn run(
                             .decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer)
                             .unwrap();
 
-                        compute.queue.write_texture(
-                            wgpu::ImageCopyTexture {
-                                texture: &orb_program.program.textures["input_image"],
-                                mip_level: 0,
-                                origin: wgpu::Origin3d::ZERO,
-                                aspect: wgpu::TextureAspect::All,
-                            },
-                            &frame_buffer,
-                            wgpu::ImageDataLayout {
-                                offset: 0,
-                                bytes_per_row: (4 * frame_width).into(),
-                                rows_per_image: None,
-                            },
-                            wgpu::Extent3d { 
-                                width: frame_width, 
-                                height: frame_height, 
-                                depth_or_array_layers: 1
-                            }
-                        );
+                        orb_program.write_input_image(&frame_buffer);
                     }
 
                     orb_program.run(OrbParams {
@@ -207,13 +210,13 @@ async fn run(
 
                     encoder.copy_texture_to_texture(
                         wgpu::ImageCopyTextureBase {
-                            texture: &orb_program.program.textures["visualization"],
+                            texture: &orb_program.storage().textures["visualization"],
                             mip_level: 0,
                             origin: wgpu::Origin3d::ZERO,
                             aspect: wgpu::TextureAspect::All,
                         },
                         wgpu::ImageCopyTextureBase {
-                            texture: &vis.program.textures["texture"],
+                            texture: &vis.storage().textures["texture"],
                             mip_level: 0,
                             origin: wgpu::Origin3d::ZERO,
                             aspect: wgpu::TextureAspect::All,
@@ -236,12 +239,12 @@ async fn run(
                             timestamp_writes: None,
                             occlusion_query_set: None,
                         });
-                        rpass.set_pipeline(&vis.program.render_pipelines["draw_texture"]);
-                        rpass.set_bind_group(0, &vis.program.bind_groups["draw_texture"], &[]);
+                        rpass.set_pipeline(&vis.storage().render_pipelines["draw_texture"]);
+                        rpass.set_bind_group(0, &vis.storage().bind_groups["draw_texture"], &[]);
                         rpass.draw(0..3, 0..1);
                     }
 
-                    compute.queue.submit(Some(encoder.finish()));
+                    orb_program.compute().queue.submit(Some(encoder.finish()));
 
                     frame.present();
 
@@ -261,5 +264,5 @@ async fn run(
 fn main() -> Result<(), winit::error::EventLoopError> {
     let event_loop = EventLoop::new().unwrap();
     let window = Window::new(&event_loop).unwrap();
-    pollster::block_on(run(event_loop, Arc::new(window)))
+    run(event_loop, Arc::new(window))
 }
