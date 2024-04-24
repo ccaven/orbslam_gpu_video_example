@@ -8,8 +8,8 @@ edition = "2021"
 [dependencies]
 env_logger = "0.10"
 wgpu = "0.19.3"
-tinyslam = { path = "../tinyslam" }
-tiny_wgpu = { path = "../tiny_wgpu" }
+tiny_wgpu = "0.1.0"
+tinyslam = { git="https://github.com/ccaven/tinyslam.git" }
 nokhwa = { path="./nokhwa", features=["input-native"]  }
 winit = "0.29.15"
 pollster = "0.3.0"

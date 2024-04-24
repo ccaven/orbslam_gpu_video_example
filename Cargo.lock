@@ -1772,6 +1772,8 @@ dependencies = [
 [[package]]
 name = "tiny_wgpu"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d7d21b75c2eef9e90ac385d66161e5488c31f3924275ffdb6d42e6f9577533e"
 dependencies = [
  "flume 0.11.0",
  "wgpu",
@@ -1780,6 +1782,7 @@ dependencies = [
 [[package]]
 name = "tinyslam"
 version = "0.1.0"
+source = "git+https://github.com/ccaven/tinyslam.git#7e7a5779a2f23d659b823bb444012ee01741481e"
 dependencies = [
  "bytemuck",
  "flume 0.11.0",
