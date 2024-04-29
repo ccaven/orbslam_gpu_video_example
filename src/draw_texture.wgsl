@@ -15,9 +15,9 @@ struct VertexOutput {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var points = array(
         // Triangle 1, which overdraws but still covers the entire screen
-        vec2f(-1.0, -4.0),
+        vec2f(-1.0, -3.0),
         vec2f(-1.0, 1.0),
-        vec2f(4.0, 1.0),
+        vec2f(3.0, 1.0),
     );
 
     var out: VertexOutput;

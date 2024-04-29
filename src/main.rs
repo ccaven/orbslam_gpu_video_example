@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc};
 
 use pollster::FutureExt;
 use winit::{
@@ -10,10 +10,7 @@ use nokhwa::{pixel_format::RgbAFormat, utils::RequestedFormat, Camera};
 use tinyslam::orb::{OrbConfig, OrbParams, OrbProgram};
 
 use tiny_wgpu::{
-    Compute,
-    Storage,
-    ComputeProgram,
-    BindGroupItem
+    BindGroupItem, Compute, ComputeProgram, RenderKernel, Storage
 };
 
 struct VisualizationProgram<'a> {
@@ -62,10 +59,12 @@ impl<'a> VisualizationProgram<'a> {
         self.add_render_pipelines(
             "draw_texture",
             &["draw_texture"],
-            &[("draw_texture", ("vs_main", "fs_main"))],
+            &[RenderKernel { label: "draw_texture", vertex: "vs_main", fragment: "fs_main" }],
             &[],
             &[Some(swapchain_format.into())],
             &[],
+            None,
+            None
         );
     }
 }
@@ -83,26 +82,26 @@ fn run(
         )
         .unwrap();
 
-        println!(
-            "Frame rate: {}",
-            camera.refresh_camera_format().unwrap().frame_rate()
-        );
+        // println!(
+        //     "Frame rate: {}",
+        //     camera.refresh_camera_format().unwrap().frame_rate()
+        // );
 
-        let mut formats = camera.compatible_camera_formats().unwrap();
+        // let mut formats = camera.compatible_camera_formats().unwrap();
 
-        formats.sort_by(|a, b| {
-            if a.frame_rate() > b.frame_rate() {
-                std::cmp::Ordering::Greater
-            } else if a.frame_rate() < b.frame_rate() {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        });
+        // formats.sort_by(|a, b| {
+        //     if a.frame_rate() > b.frame_rate() {
+        //         std::cmp::Ordering::Greater
+        //     } else if a.frame_rate() < b.frame_rate() {
+        //         std::cmp::Ordering::Less
+        //     } else {
+        //         std::cmp::Ordering::Equal
+        //     }
+        // });
 
-        for format in formats {
-            println!("Available: {:?}", format);
-        }
+        // for format in formats {
+        //     println!("Available: {:?}", format);
+        // }
 
         camera.open_stream().expect("Could not open stream.");
 
@@ -123,6 +122,10 @@ fn run(
         height: frame_height
     });
 
+
+
+    
+
     let mut orb_program = OrbProgram {
         config: OrbConfig {
             max_features: 1 << 14,
@@ -131,9 +134,28 @@ fn run(
                 width: frame_width, 
                 height: frame_height, 
                 depth_or_array_layers: 1
-            }
+            },
+            hierarchy_depth: 3
         },
-        compute: Compute::new().block_on(),
+        compute: Compute::new(
+            {
+                let mut features = wgpu::Features::PUSH_CONSTANTS;
+
+                features |= wgpu::Features::BGRA8UNORM_STORAGE;
+                features |= wgpu::Features::TIMESTAMP_QUERY;
+                features |= wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+                features |= wgpu::Features::CLEAR_TEXTURE;
+                
+                features
+            },
+            {
+                let mut limits = wgpu::Limits::default();
+                limits.max_push_constant_size = 4;
+                limits.max_storage_buffers_per_shader_stage = 8;
+                limits
+            }
+            
+        ).block_on(),
         storage: Default::default()
     };
 
@@ -263,5 +285,6 @@ fn run(
 fn main() -> Result<(), winit::error::EventLoopError> {
     let event_loop = EventLoop::new().unwrap();
     let window = Window::new(&event_loop).unwrap();
+    window.set_title("tinyslam example");
     run(event_loop, Arc::new(window))
 }
