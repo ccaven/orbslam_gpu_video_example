@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use pollster::FutureExt;
 use winit::{
@@ -16,20 +16,20 @@ use tiny_wgpu::{
 struct VisualizationProgram<'a> {
     pub surface: wgpu::Surface<'a>,
 
-    storage: Storage<'a>,
+    storage: Storage,
     compute: &'a Compute
 }
 
-impl<'a> ComputeProgram<'a> for VisualizationProgram<'a> {
+impl<'a> ComputeProgram for VisualizationProgram<'a> {
     fn compute(&self) -> &Compute {
         self.compute
     }
     
-    fn storage(&self) -> &Storage<'a> {
+    fn storage(&self) -> &Storage {
         &self.storage
     }
 
-    fn storage_mut(&mut self) -> &mut Storage<'a> {
+    fn storage_mut(&mut self) -> &mut Storage {
         &mut self.storage
     }
 }
