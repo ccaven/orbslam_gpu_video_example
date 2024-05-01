@@ -1,13 +1,22 @@
+/*
+
+TODO:
+ - Finish draw_corners shader
+ - Test linking OrbProgram buffer
+
+*/
+
 use std::sync::Arc;
 
 use pollster::FutureExt;
+use wgpu::BufferUsages;
 use winit::{
     dpi::PhysicalSize, event::{Event, WindowEvent}, event_loop::EventLoop, window::Window
 };
 
 use nokhwa::{pixel_format::RgbAFormat, utils::RequestedFormat, Camera};
 
-use tinyslam::orb::{OrbConfig, OrbParams, OrbProgram};
+use tinyslam::orb::{OrbConfig, OrbProgram};
 
 use tiny_wgpu::{
     BindGroupItem, Compute, ComputeProgram, RenderKernel, Storage
@@ -16,8 +25,12 @@ use tiny_wgpu::{
 struct VisualizationProgram<'a> {
     pub surface: wgpu::Surface<'a>,
 
+    pub image_size: wgpu::Extent3d,
+
     storage: Storage,
-    compute: &'a Compute
+    compute: &'a Compute,
+
+    orb_storage: &'a Storage
 }
 
 impl<'a> ComputeProgram for VisualizationProgram<'a> {
@@ -35,37 +48,187 @@ impl<'a> ComputeProgram for VisualizationProgram<'a> {
 }
 
 impl<'a> VisualizationProgram<'a> {    
-    pub fn init(
-        &mut self,
-        output_image_size: wgpu::Extent3d
-    ) {
-        self.add_module("draw_texture", wgpu::include_wgsl!("draw_texture.wgsl"));
+    pub fn init(&mut self) {
+        self.add_module("blit", wgpu::include_wgsl!("shaders/blit.wgsl"));
+        self.add_module("draw_corners", wgpu::include_wgsl!("shaders/draw_corners.wgsl"));
 
         self.add_texture(
-            "texture",
-            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            "visualization",
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
             wgpu::TextureFormat::Rgba8Unorm,
-            output_image_size,
+            self.image_size,
         );
 
-        self.add_bind_group(
-            "draw_texture",
-            &[BindGroupItem::Texture { label: "texture" }],
+        self.add_sampler(
+            "linear_sampler",
+            wgpu::SamplerDescriptor {
+                label: None,
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                lod_max_clamp: 1.0,
+                lod_min_clamp: 0.0,
+                compare: None,
+                anisotropy_clamp: 1,
+                border_color: None
+            }
         );
+
+        self.add_buffer(
+            "base_resolution", 
+            BufferUsages::UNIFORM | BufferUsages::COPY_DST, 
+            4 * 2
+        );
+
+        {
+            self.compute().queue.write_buffer(
+                &self.storage().buffers["base_resolution"], 
+                0,
+                bytemuck::cast_slice(&[ self.image_size.width, self.image_size.height ])
+            );
+        }
+
+        self.add_bind_group("blit_to_screen", &[
+            BindGroupItem::Sampler { label: "linear_sampler" },
+            BindGroupItem::Texture { label: "visualization" }
+        ]);
 
         let swapchain_capabilities = self.surface.get_capabilities(&self.compute().adapter);
         let swapchain_format = swapchain_capabilities.formats[0];
 
         self.add_render_pipelines(
-            "draw_texture",
-            &["draw_texture"],
-            &[RenderKernel { label: "draw_texture", vertex: "vs_main", fragment: "fs_main" }],
+            "blit",
+            &["blit_to_screen"],
+            &[RenderKernel { label: "blit_to_screen", vertex: "vs_main", fragment: "fs_main" }],
             &[],
             &[Some(swapchain_format.into())],
             &[],
             None,
             None
         );
+
+        self.add_bind_group("base_resolution", &[
+            BindGroupItem::UniformBuffer { label: "base_resolution", min_binding_size: 8 }
+        ]);
+
+        self.add_render_pipelines(
+            "draw_corners",
+            &["base_resolution"], 
+            &[RenderKernel { label: "draw_corners", vertex: "vs_main", fragment: "fs_main" }], 
+            &[], 
+            &[Some(self.storage().textures["visualization"].format().into())], 
+            &[wgpu::VertexBufferLayout {
+                array_stride: 4 * 4,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &[
+                    // X
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Uint32,
+                        offset: 0,
+                        shader_location: 0
+                    },
+                    // Y
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Uint32,
+                        offset: 4,
+                        shader_location: 1
+                    },
+                    // Angle
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32,
+                        offset: 8,
+                        shader_location: 2
+                    },
+                    // Octave
+                    wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Uint32,
+                        offset: 12,
+                        shader_location: 3
+                    },
+                ]
+            }], 
+            None, 
+            None
+        );
+    }
+
+    pub fn run(&self, num_corners: u32) {
+
+        let mut encoder = self.compute().device.create_command_encoder(&Default::default());
+
+        encoder.copy_texture_to_texture(
+            wgpu::ImageCopyTextureBase { 
+                texture: &self.orb_storage.textures["input_image"], 
+                mip_level: 0, 
+                origin: wgpu::Origin3d::ZERO, 
+                aspect: wgpu::TextureAspect::All
+            }, 
+            wgpu::ImageCopyTextureBase { 
+                texture: &self.storage().textures["visualization"], 
+                mip_level: 0, 
+                origin: wgpu::Origin3d::ZERO, 
+                aspect: wgpu::TextureAspect::All
+            }, 
+            self.image_size
+        );
+
+        if num_corners > 0 {
+            {
+                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { 
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { 
+                        view: &self.storage().texture_views["visualization"], 
+                        resolve_target: None, 
+                        ops: wgpu::Operations { 
+                            load: wgpu::LoadOp::Load, 
+                            store: wgpu::StoreOp::Store
+                        } 
+                    })], 
+                    ..Default::default()
+                });
+
+                rpass.set_pipeline(&self.storage().render_pipelines["draw_corners"]);
+                rpass.set_bind_group(0, &self.storage().bind_groups["base_resolution"], &[]);
+                rpass.set_vertex_buffer(0, self.orb_storage.buffers["latest_corners"].slice(..(num_corners as u64 * 4 * 4)));
+                rpass.draw(0..6, 0..num_corners);
+            }
+        }
+
+        let frame = self.surface.get_current_texture().unwrap();
+        let view = frame.texture.create_view(&Default::default());
+
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { 
+                    view: &view,
+                    resolve_target: None, 
+                    ops: wgpu::Operations { 
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), 
+                        store: wgpu::StoreOp::Store
+                    } 
+                })],
+                ..Default::default()
+            });
+
+            rpass.set_pipeline(&self.storage().render_pipelines["blit_to_screen"]);
+            rpass.set_bind_group(0, &self.storage().bind_groups["blit_to_screen"], &[]);
+            rpass.draw(0..3, 0..1);
+        }
+
+        self.compute().queue.submit(Some(encoder.finish()));
+
+        frame.present();
+    }
+
+    fn configure_surface(&self, width: u32, height: u32) {
+        let config = self
+            .surface
+            .get_default_config(&self.compute().adapter, width, height)
+            .unwrap();
+    
+        self.surface.configure(&self.compute().device, &config);
     }
 }
 
@@ -74,34 +237,12 @@ fn run(
     window: Arc<Window>,
 ) -> Result<(), winit::error::EventLoopError> {
     let mut camera = {
-        let mut camera = Camera::new(
-            nokhwa::utils::CameraIndex::Index(0),
-            RequestedFormat::new::<nokhwa::pixel_format::RgbAFormat>(
-                nokhwa::utils::RequestedFormatType::AbsoluteHighestResolution,
-            ),
-        )
-        .unwrap();
+        let index = nokhwa::utils::CameraIndex::Index(0);
+        let requested_format = nokhwa::utils::RequestedFormatType::AbsoluteHighestResolution;
+        type Decoder = nokhwa::pixel_format::RgbAFormat;
+        let format = RequestedFormat::new::<Decoder>(requested_format);
 
-        // println!(
-        //     "Frame rate: {}",
-        //     camera.refresh_camera_format().unwrap().frame_rate()
-        // );
-
-        // let mut formats = camera.compatible_camera_formats().unwrap();
-
-        // formats.sort_by(|a, b| {
-        //     if a.frame_rate() > b.frame_rate() {
-        //         std::cmp::Ordering::Greater
-        //     } else if a.frame_rate() < b.frame_rate() {
-        //         std::cmp::Ordering::Less
-        //     } else {
-        //         std::cmp::Ordering::Equal
-        //     }
-        // });
-
-        // for format in formats {
-        //     println!("Available: {:?}", format);
-        // }
+        let mut camera = Camera::new(index, format).unwrap();
 
         camera.open_stream().expect("Could not open stream.");
 
@@ -122,167 +263,105 @@ fn run(
         height: frame_height
     });
 
-
-
-    
-
-    let mut orb_program = OrbProgram {
-        config: OrbConfig {
-            max_features: 1 << 14,
-            max_matches: 1 << 14,
-            image_size: wgpu::Extent3d { 
-                width: frame_width, 
-                height: frame_height, 
-                depth_or_array_layers: 1
+    let orb_program = {
+        let mut orb_program = OrbProgram {
+            config: OrbConfig {
+                max_features: 1 << 14,
+                max_matches: 1 << 14,
+                image_size: wgpu::Extent3d { 
+                    width: frame_width, 
+                    height: frame_height, 
+                    depth_or_array_layers: 1
+                },
+                hierarchy_depth: 3
             },
-            hierarchy_depth: 3
-        },
-        compute: Compute::new(
-            {
-                let mut features = wgpu::Features::PUSH_CONSTANTS;
+            compute: Compute::new(
+                {
+                    let mut features = wgpu::Features::PUSH_CONSTANTS;
 
-                features |= wgpu::Features::BGRA8UNORM_STORAGE;
-                features |= wgpu::Features::TIMESTAMP_QUERY;
-                features |= wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
-                features |= wgpu::Features::CLEAR_TEXTURE;
+                    features |= wgpu::Features::BGRA8UNORM_STORAGE;
+                    features |= wgpu::Features::TIMESTAMP_QUERY;
+                    features |= wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+                    features |= wgpu::Features::CLEAR_TEXTURE;
+                    
+                    features
+                },
+                {
+                    let mut limits = wgpu::Limits::default();
+                    limits.max_push_constant_size = 4;
+                    limits.max_storage_buffers_per_shader_stage = 8;
+                    limits
+                }
                 
-                features
-            },
-            {
-                let mut limits = wgpu::Limits::default();
-                limits.max_push_constant_size = 4;
-                limits.max_storage_buffers_per_shader_stage = 8;
-                limits
+            ).block_on(),
+            storage: Default::default()
+        };
+
+        orb_program.init();
+        orb_program
+    };
+
+    let visualization_program = {
+        let mut visualization_program = VisualizationProgram {
+            compute: orb_program.compute(),
+            surface: orb_program.compute().instance.create_surface(&window).unwrap(),
+            storage: Default::default(),
+            orb_storage: orb_program.storage(),
+            image_size: wgpu::Extent3d {
+                width: frame_width,
+                height: frame_height,
+                depth_or_array_layers: 1
             }
-            
-        ).block_on(),
-        storage: Default::default()
-    };
-
-    orb_program.init();
-
-    let mut vis = VisualizationProgram {
-        compute: orb_program.compute(),
-        surface: orb_program.compute().instance.create_surface(&window).unwrap(),
-        storage: Default::default()
-    };
-
-    vis.init(wgpu::Extent3d {
-        width: frame_width,
-        height: frame_height,
-        depth_or_array_layers: 1
-    });
-
-    let mut config = vis
-        .surface
-        .get_default_config(&orb_program.compute().adapter, frame_width, frame_height)
-        .unwrap();
+        };
     
-    vis.surface.configure(&orb_program.compute().device, &config);
+        visualization_program.init();
 
-    let mut frame_count: u32 = 0;
+        visualization_program.configure_surface(frame_width, frame_height);
+
+        visualization_program
+    };
 
     let window = &window;
     let orb_program = &orb_program;
 
     event_loop.run(move |event, target| {
 
-        if let Event::WindowEvent {
-            window_id: _,
-            event,
-        } = event
-        {
-            match event {
-                WindowEvent::Resized(new_size) => {
-                    config.width = new_size.width.max(1);
-                    config.height = new_size.height.max(1);
-                    vis.surface.configure(&orb_program.compute().device, &config);
-                    window.request_redraw();
-                },
-                WindowEvent::RedrawRequested => {
-                    let frame = vis.surface.get_current_texture().unwrap();
-                    let view = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-                    let mut encoder =
-                        orb_program.compute()
-                            .device
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("Draw loop"),
-                            });
+        let Event::WindowEvent { event, .. } = event else { return; };
 
-                    {
-                        let new_camera_frame = camera.frame().unwrap();
+        match event {
+            WindowEvent::Resized(new_size) => {
+                visualization_program.configure_surface(new_size.width, new_size.height);
+                window.request_redraw();
+            },
+            WindowEvent::RedrawRequested => {
+                let new_camera_frame = camera.frame().unwrap();
 
-                        new_camera_frame
-                            .decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer)
-                            .unwrap();
+                new_camera_frame
+                    .decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer)
+                    .unwrap();
 
-                        orb_program.write_input_image(&frame_buffer);
-                    }
+                orb_program.write_input_image(&frame_buffer);
 
-                    orb_program.run(OrbParams {
-                        record_keyframe: frame_count == 100,
-                    });
+                let corner_count = orb_program.extract_corners();
 
-                    if frame_count == 100 {
-                        println!("Recorded keyframe.");
-                    }
+                println!("Detected {} corners.", corner_count);
 
-                    encoder.copy_texture_to_texture(
-                        wgpu::ImageCopyTextureBase {
-                            texture: &orb_program.storage().textures["visualization"],
-                            mip_level: 0,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        wgpu::ImageCopyTextureBase {
-                            texture: &vis.storage().textures["texture"],
-                            mip_level: 0,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        orb_program.config.image_size.clone(),
-                    );
+                visualization_program.run(corner_count);
 
-                    {
-                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: None,
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                            timestamp_writes: None,
-                            occlusion_query_set: None,
-                        });
-                        rpass.set_pipeline(&vis.storage().render_pipelines["draw_texture"]);
-                        rpass.set_bind_group(0, &vis.storage().bind_groups["draw_texture"], &[]);
-                        rpass.draw(0..3, 0..1);
-                    }
-
-                    orb_program.compute().queue.submit(Some(encoder.finish()));
-
-                    frame.present();
-
-                    window.request_redraw();
-
-                    frame_count += 1;
-                },
-                WindowEvent::CloseRequested => {
-                    target.exit();
-                },
-                _ => {}
-            }
+                window.request_redraw();
+            },
+            WindowEvent::CloseRequested => {
+                target.exit();
+            },
+            _ => {}
         }
+        
     })
 }
 
 fn main() -> Result<(), winit::error::EventLoopError> {
+    std::env::set_var("RUST_BACKTRACE", "1");
+
     let event_loop = EventLoop::new().unwrap();
     let window = Window::new(&event_loop).unwrap();
     window.set_title("tinyslam example");
