@@ -191,7 +191,7 @@ impl<'a> VisualizationProgram<'a> {
 
                 rpass.set_pipeline(&self.storage().render_pipelines["draw_corners"]);
                 rpass.set_bind_group(0, &self.storage().bind_groups["base_resolution"], &[]);
-                rpass.set_vertex_buffer(0, self.orb_storage.buffers["latest_corners"].slice(..(num_corners as u64 * 4 * 4)));
+                rpass.set_vertex_buffer(0, self.orb_storage.buffers["corners"].slice(..(num_corners as u64 * 4 * 4)));
                 rpass.draw(0..6, 0..num_corners);
             }
         }
@@ -267,7 +267,6 @@ fn run(
         let mut orb_program = OrbProgram {
             config: OrbConfig {
                 max_features: 1 << 14,
-                max_matches: 1 << 14,
                 image_size: wgpu::Extent3d { 
                     width: frame_width, 
                     height: frame_height, 
@@ -283,6 +282,9 @@ fn run(
                     features |= wgpu::Features::TIMESTAMP_QUERY;
                     features |= wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
                     features |= wgpu::Features::CLEAR_TEXTURE;
+                    features |= wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+                    features |= wgpu::Features::TEXTURE_BINDING_ARRAY;
+                    features |= wgpu::Features::SUBGROUP;
                     
                     features
                 },
