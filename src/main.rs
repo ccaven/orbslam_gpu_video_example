@@ -5,6 +5,7 @@ TODO:
 
 */
 
+
 use std::{borrow::Cow, sync::Arc};
 
 use compeg::DecodeOp;
@@ -21,6 +22,8 @@ use tinyslam::orb::{self, OrbConfig, OrbProgram};
 use tiny_wgpu::{
     BindGroupItem, Compute, ComputeProgram, RenderKernel, Storage
 };
+
+mod decoder;
 
 struct VisualizationProgram<'a> {
     pub surface: wgpu::Surface<'a>,
@@ -415,6 +418,7 @@ fn run(
                 }
 
                 let image_data = compeg::ImageData::new(new_camera_frame.buffer()).unwrap();
+                println!("Parallelism: {}", image_data.parallelism());
                 decoder.start_decode(&image_data);
                 orb_program.compute().device.poll(wgpu::Maintain::Wait);
 
@@ -428,13 +432,11 @@ fn run(
 
                 {
                     // Copy into input image texture
-                    let mut encoder = orb_program.compute().device.create_command_encoder(&Default::default());
+                    // let mut encoder = orb_program.compute().device.create_command_encoder(&Default::default());
 
-                    let src_texture = decoder.texture();
+                    // let src_texture = decoder.texture();
                     
-                    let dst_texture = &orb_program.storage().textures["input_image"];
-
-                    visualization_program.storage_mut().texture_views.insert("incoming_view", src_texture.create_view(&Default::default()));
+                    // let dst_texture = &orb_program.storage().textures["input_image"];
 
                     let sampler = &visualization_program.storage().samplers["linear_sampler"];
 
@@ -448,14 +450,14 @@ fn run(
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&visualization_program.storage().texture_views["incoming_view"])
+                                resource: wgpu::BindingResource::TextureView(&decoder.output.view)
                             }
                         ]
                     });
 
-                    println!("{:?} -> {:?}", src_texture.format(), dst_texture.format());
-                    println!("{:?} -> {:?}", src_texture.usage(), dst_texture.usage());
-                    println!("{:?} -> {:?}", src_texture.size(), dst_texture.size());
+                    // println!("{:?} -> {:?}", src_texture.format(), dst_texture.format());
+                    // println!("{:?} -> {:?}", src_texture.usage(), dst_texture.usage());
+                    // println!("{:?} -> {:?}", src_texture.size(), dst_texture.size());
 
                     visualization_program.storage_mut().bind_groups.insert("blit_to_screen", new_bind_group);
 

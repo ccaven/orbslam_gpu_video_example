@@ -167,7 +167,7 @@ pub struct DynamicTexture {
     gpu: Arc<Gpu>,
     name: Cow<'static, str>,
     texture: Texture,
-    view: TextureView,
+    pub view: TextureView,
     /// The generation counter starts at 0 and is incremented every time the underlying [`Texture`]
     /// is reallocated to make more space. It is used for change detection, in order to recreate
     /// the [`BindGroup`] this texture is used in.

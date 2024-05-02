@@ -280,7 +280,7 @@ pub struct Decoder {
     scan_data: DynamicBuffer,
     start_positions_buffer: DynamicBuffer,
     coefficients: DynamicBuffer,
-    output: DynamicTexture,
+    pub output: DynamicTexture,
     metadata_bg: DynamicBindGroup,
     huffman_bg: DynamicBindGroup,
     coefficients_bg: DynamicBindGroup,
