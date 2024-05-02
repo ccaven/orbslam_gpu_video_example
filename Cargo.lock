@@ -207,6 +207,20 @@ name = "bytemuck"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d6d68c57235a3a081186990eca2867354726650f42f7516ca50c28d6281fd15"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4da9a32f3fed317401fa3c862968128267c3106685286e15d5aaa3d7389c2f60"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.58",
+]
 
 [[package]]
 name = "byteorder"
@@ -384,6 +398,15 @@ checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "compeg"
+version = "0.3.0"
+dependencies = [
+ "bytemuck",
+ "log",
+ "wgpu",
 ]
 
 [[package]]
@@ -1813,9 +1836,9 @@ dependencies = [
 
 [[package]]
 name = "tiny_wgpu"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f529682beb0c407d21ed98d23945e3992e6ec2c7c4d27f57502e7e706eae2a8"
+checksum = "814e56e0b2b903ffdfe073c02bce71ab96f2e3ef1593d63ec94858bd80a91e17"
 dependencies = [
  "flume 0.11.0",
  "wgpu",
@@ -1839,6 +1862,7 @@ name = "tinyslam_app"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "compeg",
  "env_logger",
  "nokhwa",
  "pollster",

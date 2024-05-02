@@ -1,0 +1,28 @@
+[package]
+name = "compeg"
+version = "0.3.0"
+edition = "2021"
+license = "0BSD"
+description = "A JPEG decoder implemented as a WebGPU compute shader"
+repository = "https://github.com/SludgePhD/Compeg"
+
+[dependencies]
+wgpu = "0.20.0"
+bytemuck = { version = "1.13.1", features = ["derive", "min_const_generics"] }
+log = "0.4.19"
+
+[dev-dependencies]
+expect-test = "1.4.1"
+winit = { version = "0.30.0", default-features = false, features = ["x11", "rwh_06"] }
+env_logger = "0.11.3"
+anyhow = "1.0.71"
+pollster = "0.3.0"
+fastrand = "2.0.0"
+# linuxvideo = "0.3.0"
+png = "0.17.10"
+jpeg-encoder = "0.6.0"
+criterion = { version = "0.5.1", default-features = false }
+
+[[bench]]
+name = "bench"
+harness = false

@@ -1,22 +1,22 @@
 /*
 
 TODO:
- - Finish draw_corners shader
- - Test linking OrbProgram buffer
+ - Figure out how to integrate this wgpu jpeg decoder
 
 */
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
+use compeg::DecodeOp;
 use pollster::FutureExt;
-use wgpu::BufferUsages;
+use wgpu::{BufferUsages, TextureAspect, TextureUsages};
 use winit::{
     dpi::PhysicalSize, event::{Event, WindowEvent}, event_loop::EventLoop, window::Window
 };
 
 use nokhwa::{pixel_format::RgbAFormat, utils::RequestedFormat, Camera};
 
-use tinyslam::orb::{OrbConfig, OrbProgram};
+use tinyslam::orb::{self, OrbConfig, OrbProgram};
 
 use tiny_wgpu::{
     BindGroupItem, Compute, ComputeProgram, RenderKernel, Storage
@@ -121,6 +121,7 @@ impl<'a> VisualizationProgram<'a> {
             &[], 
             &[Some(self.storage().textures["visualization"].format().into())], 
             &[wgpu::VertexBufferLayout {
+                // Each feature is 4 u32s
                 array_stride: 4 * 4,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &[
@@ -147,12 +148,43 @@ impl<'a> VisualizationProgram<'a> {
                         format: wgpu::VertexFormat::Uint32,
                         offset: 12,
                         shader_location: 3
-                    },
+                    }
                 ]
             }], 
             None, 
             None
         );
+    }
+
+    pub fn blit(&self) {
+
+        let mut encoder = self.compute().device.create_command_encoder(&Default::default());
+
+        let frame = self.surface.get_current_texture().unwrap();
+        let view = frame.texture.create_view(&Default::default());
+
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { 
+                    view: &view,
+                    resolve_target: None, 
+                    ops: wgpu::Operations { 
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), 
+                        store: wgpu::StoreOp::Store
+                    } 
+                })],
+                ..Default::default()
+            });
+
+            rpass.set_pipeline(&self.storage().render_pipelines["blit_to_screen"]);
+            rpass.set_bind_group(0, &self.storage().bind_groups["blit_to_screen"], &[]);
+            rpass.draw(0..3, 0..1);
+        }
+
+        self.compute().queue.submit(Some(encoder.finish()));
+
+        frame.present();
+
     }
 
     pub fn run(&self, num_corners: u32) {
@@ -191,7 +223,7 @@ impl<'a> VisualizationProgram<'a> {
 
                 rpass.set_pipeline(&self.storage().render_pipelines["draw_corners"]);
                 rpass.set_bind_group(0, &self.storage().bind_groups["base_resolution"], &[]);
-                rpass.set_vertex_buffer(0, self.orb_storage.buffers["latest_corners"].slice(..(num_corners as u64 * 4 * 4)));
+                rpass.set_vertex_buffer(0, self.orb_storage.buffers["corners"].slice(..(num_corners as u64 * 4 * 4)));
                 rpass.draw(0..6, 0..num_corners);
             }
         }
@@ -223,6 +255,8 @@ impl<'a> VisualizationProgram<'a> {
     }
 
     fn configure_surface(&self, width: u32, height: u32) {
+        println!("Called configure surface with ({}, {})", width, height);
+
         let config = self
             .surface
             .get_default_config(&self.compute().adapter, width, height)
@@ -263,17 +297,41 @@ fn run(
         height: frame_height
     });
 
+    let compute = Compute::new(
+        {
+            let mut features = wgpu::Features::PUSH_CONSTANTS;
+
+            features |= wgpu::Features::BGRA8UNORM_STORAGE;
+            features |= wgpu::Features::TIMESTAMP_QUERY;
+            features |= wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+            features |= wgpu::Features::CLEAR_TEXTURE;
+            features |= wgpu::Features::TEXTURE_BINDING_ARRAY;
+            features |= wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+            features |= wgpu::Features::SUBGROUP;
+            features |= wgpu::Features::SUBGROUP_VERTEX;
+            features |= wgpu::Features::SUBGROUP_BARRIER;
+
+            features
+        },
+        {
+            let mut limits = wgpu::Limits::default();
+            limits.max_push_constant_size = 4;
+            limits.max_storage_buffers_per_shader_stage = 8;
+            limits
+        }
+        
+    ).block_on();
+
     let orb_program = {
         let mut orb_program = OrbProgram {
             config: OrbConfig {
-                max_features: 1 << 14,
-                max_matches: 1 << 14,
+                max_features: 4096,
                 image_size: wgpu::Extent3d { 
                     width: frame_width, 
                     height: frame_height, 
                     depth_or_array_layers: 1
                 },
-                hierarchy_depth: 3
+                hierarchy_depth: 4
             },
             compute: Compute::new(
                 {
@@ -283,7 +341,12 @@ fn run(
                     features |= wgpu::Features::TIMESTAMP_QUERY;
                     features |= wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
                     features |= wgpu::Features::CLEAR_TEXTURE;
-                    
+                    features |= wgpu::Features::TEXTURE_BINDING_ARRAY;
+                    features |= wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+                    features |= wgpu::Features::SUBGROUP;
+                    features |= wgpu::Features::SUBGROUP_VERTEX;
+                    features |= wgpu::Features::SUBGROUP_BARRIER;
+
                     features
                 },
                 {
@@ -301,7 +364,7 @@ fn run(
         orb_program
     };
 
-    let visualization_program = {
+    let mut visualization_program = {
         let mut visualization_program = VisualizationProgram {
             compute: orb_program.compute(),
             surface: orb_program.compute().instance.create_surface(&window).unwrap(),
@@ -316,9 +379,20 @@ fn run(
     
         visualization_program.init();
 
-        visualization_program.configure_surface(frame_width, frame_height);
+        // visualization_program.configure_surface(frame_width, frame_height);
 
         visualization_program
+    };
+
+    let mut decoder = {
+        let compeg_gpu = Arc::new(compeg::Gpu::from_wgpu(
+            compute.device.clone(), 
+            compute.queue.clone()
+        ).unwrap());
+
+        let decoder = compeg::Decoder::with_texture_usages(compeg_gpu.clone(), TextureUsages::COPY_SRC);
+
+        decoder
     };
 
     let window = &window;
@@ -336,17 +410,78 @@ fn run(
             WindowEvent::RedrawRequested => {
                 let new_camera_frame = camera.frame().unwrap();
 
-                new_camera_frame
-                    .decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer)
-                    .unwrap();
+                if new_camera_frame.resolution().width() == 0 {
+                    return;
+                }
 
-                orb_program.write_input_image(&frame_buffer);
+                let image_data = compeg::ImageData::new(new_camera_frame.buffer()).unwrap();
+                decoder.start_decode(&image_data);
+                orb_program.compute().device.poll(wgpu::Maintain::Wait);
 
-                let corner_count = orb_program.extract_corners();
+                // visualization_program.draw_texture_directly(decoder.texture());
 
-                println!("Detected {} corners.", corner_count);
+                // new_camera_frame
+                //     .decode_image_to_buffer::<RgbAFormat>(&mut frame_buffer)
+                //     .unwrap();
 
-                visualization_program.run(corner_count);
+                // orb_program.write_input_image(&frame_buffer);
+
+                {
+                    // Copy into input image texture
+                    let mut encoder = orb_program.compute().device.create_command_encoder(&Default::default());
+
+                    let src_texture = decoder.texture();
+                    
+                    let dst_texture = &orb_program.storage().textures["input_image"];
+
+                    visualization_program.storage_mut().texture_views.insert("incoming_view", src_texture.create_view(&Default::default()));
+
+                    let sampler = &visualization_program.storage().samplers["linear_sampler"];
+
+                    let new_bind_group = orb_program.compute().device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        layout: &visualization_program.storage().bind_group_layouts["blit_to_screen"],
+                        label: None,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::Sampler(sampler)
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&visualization_program.storage().texture_views["incoming_view"])
+                            }
+                        ]
+                    });
+
+                    println!("{:?} -> {:?}", src_texture.format(), dst_texture.format());
+                    println!("{:?} -> {:?}", src_texture.usage(), dst_texture.usage());
+                    println!("{:?} -> {:?}", src_texture.size(), dst_texture.size());
+
+                    visualization_program.storage_mut().bind_groups.insert("blit_to_screen", new_bind_group);
+
+                    // encoder.copy_texture_to_texture(
+                    //     src_texture.as_image_copy(), 
+                    //     dst_texture.as_image_copy(), 
+                    //     wgpu::Extent3d { 
+                    //         width: frame_width, 
+                    //         height: frame_height, 
+                    //         depth_or_array_layers: 1
+                    //     }
+                    // );
+
+                    // println!("Finished copy texture to texture");
+
+                    // orb_program.compute().queue.submit(Some(encoder.finish()));
+
+                }
+
+                visualization_program.blit();
+
+                // let corner_count = orb_program.extract_corners();
+
+                // println!("Detected {} corners.", corner_count);
+
+                // visualization_program.run(corner_count);
 
                 window.request_redraw();
             },
@@ -360,7 +495,7 @@ fn run(
 }
 
 fn main() -> Result<(), winit::error::EventLoopError> {
-    std::env::set_var("RUST_BACKTRACE", "1");
+    std::env::set_var("RUST_BACKTRACE", "full");
 
     let event_loop = EventLoop::new().unwrap();
     let window = Window::new(&event_loop).unwrap();
