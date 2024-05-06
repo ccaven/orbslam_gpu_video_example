@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 env_logger = "0.10"
 wgpu = "0.20.0"
-tiny_wgpu = "0.1.5"
+tiny_wgpu = "0.1.6"
 tinyslam = { path="../tinyslam" }
 nokhwa = { path="./nokhwa", features=["input-native"]  }
 winit = "0.29.15"
