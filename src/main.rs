@@ -266,7 +266,7 @@ fn run(
     let orb_program = {
         let mut orb_program = OrbProgram {
             config: OrbConfig {
-                max_features: 1 << 14,
+                max_features: 4096,
                 image_size: wgpu::Extent3d { 
                     width: frame_width, 
                     height: frame_height, 
