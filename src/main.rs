@@ -275,23 +275,13 @@ fn run(
                 hierarchy_depth: 3
             },
             compute: Compute::new(
-                {
-                    let mut features = wgpu::Features::PUSH_CONSTANTS;
-
-                    features |= wgpu::Features::BGRA8UNORM_STORAGE;
-                    features |= wgpu::Features::TIMESTAMP_QUERY;
-                    features |= wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
-                    features |= wgpu::Features::CLEAR_TEXTURE;
-                    features |= wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
-                    features |= wgpu::Features::TEXTURE_BINDING_ARRAY;
-                    features |= wgpu::Features::SUBGROUP;
-                    
-                    features
-                },
+                wgpu::Features::PUSH_CONSTANTS,
                 {
                     let mut limits = wgpu::Limits::default();
                     limits.max_push_constant_size = 4;
                     limits.max_storage_buffers_per_shader_stage = 8;
+                    limits.max_texture_dimension_1d = 4096;
+                    limits.max_texture_dimension_2d = 4096;
                     limits
                 }
                 
