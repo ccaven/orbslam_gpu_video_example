@@ -12,7 +12,7 @@ fn vs_main(
     @builtin(vertex_index) vertex_index: u32,
     @location(0) corner_x: u32,
     @location(1) corner_y: u32,
-    @location(2) corner_angle: f32,
+    @location(2) corner_angle: u32,
     @location(3) corner_octave: u32
 ) -> VertexOutput {
     var output: VertexOutput;
@@ -33,9 +33,11 @@ fn vs_main(
     let corner_size = 0.01;
     let scaled_pos = pos * f32(1u << corner_octave);
 
+    let angle = f32(corner_angle) / 1000.0;
+
     let rotation_matrix = mat2x2f(
-        cos(corner_angle), sin(corner_angle),
-        -sin(corner_angle), cos(corner_angle) 
+        cos(angle), sin(angle),
+        -sin(angle), cos(angle) 
     );
 
     let rotated_pos = rotation_matrix * scaled_pos;
@@ -65,7 +67,7 @@ fn fs_main(
     let m = dot(in.texcoord, in.texcoord);
 
     let mid = 0.8;
-    let thickness = 0.1 / in.scale;
+    let thickness = 0.05 / in.scale;
 
     let min_mag = mid - thickness;
     let max_mag = mid + thickness;

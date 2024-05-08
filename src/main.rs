@@ -8,6 +8,7 @@ TODO:
 
 use std::sync::Arc;
 
+use bytemuck::Zeroable;
 use pollster::FutureExt;
 use wgpu::BufferUsages;
 use winit::{
@@ -16,7 +17,7 @@ use winit::{
 
 use nokhwa::{pixel_format::RgbAFormat, utils::RequestedFormat, Camera};
 
-use tinyslam::orb::{OrbConfig, OrbProgram};
+use tinyslam::orb::{CornerData, CornerDescriptor, OrbConfig, OrbProgram};
 
 use tiny_wgpu::{
     BindGroupItem, Compute, ComputeProgram, RenderKernel, Storage
@@ -138,7 +139,7 @@ impl<'a> VisualizationProgram<'a> {
                     },
                     // Angle
                     wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32,
+                        format: wgpu::VertexFormat::Uint32,
                         offset: 8,
                         shader_location: 2
                     },
@@ -272,7 +273,8 @@ fn run(
                     height: frame_height, 
                     depth_or_array_layers: 1
                 },
-                hierarchy_depth: 3
+                hierarchy_depth: 3,
+                initial_threshold: 0.4,
             },
             compute: Compute::new(
                 wgpu::Features::PUSH_CONSTANTS,
@@ -335,6 +337,15 @@ fn run(
                 orb_program.write_input_image(&frame_buffer);
 
                 let corner_count = orb_program.extract_corners();
+
+                // Read corner data
+                let mut corners = vec![CornerData::zeroed(); corner_count as usize];
+                let mut descriptors = vec![CornerDescriptor::zeroed(); corner_count as usize];
+
+                orb_program.read_corners(&mut corners);
+                orb_program.read_descriptors(&mut descriptors);
+
+                // TODO: Do something with corners / descriptors
 
                 println!("Detected {} corners.", corner_count);
 
